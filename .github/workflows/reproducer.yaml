@@ -1,0 +1,56 @@
+name: test component manager
+
+on:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  reproducer:
+        name: reproduce issue in PR #44
+        runs-on: windows-latest
+        steps:
+          - name: Install espressif framework
+            run: |
+              cd $Env:tmp
+              Invoke-WebRequest -Uri https://dl.espressif.com/dl/idf-installer/esp-idf-tools-setup-online-2.24.exe `
+                -OutFile online.exe
+              # installer cli: https://jrsoftware.org/ishelp/index.php?topic=setupcmdline
+              @"
+              [Setup]
+              Lang=english
+              Dir=C:\Espressif
+              Group=ESP-IDF
+              NoIcons=0
+              SetupType=custom
+              Components=framework,ide,ide\powershell,ide\powershell\windowsterminal,ide\powershell\desktop,ide\powershell\startmenu,ide\cmd,ide\cmd\desktop,ide\cmd\startmenu,target,target\esp32,target\esp32c,target\esp32c\esp32c3,target\esp32h,target\esp32s,target\esp32s\s2,target\esp32s\s3,optimization,optimization\espressif_download,optimization\git_shallow 
+              "@ | Out-File settings.txt 
+              ./online /VERYSILENT /SUPPRESSMSGBOXES /SP- /LOADINF="settings.txt"
+              Wait-Process online
+              # install framework dependencies
+              Get-Item C:\Espressif\frameworks\esp-idf*\ | Set-Location
+              ./install.ps1
+
+          - name: Modify hello_world example and build
+            run: |
+              # load environment
+              Get-Item C:\Espressif\frameworks\esp-idf*\ | Set-Location
+              ./export.ps1
+              # modify example
+              cd examples\get-started
+              idf.py create-manifest -C .\hello_world
+              # show generated manifest
+              Get-Content .\hello_world\main\idf_component.yml
+              # modify manifest
+              @"
+                dummy-example/git-only-cmp:
+                  path: git-only-cmp
+                  git: https://github.com/MiguelBarro/example_components.git
+                  version: 7b7ffdf
+              "@ | Out-File -Append .\hello_world\main\idf_component.yml
+              # show modified manifest
+              Get-Content .\hello_world\main\idf_component.yml
+              # build example
+              idf.py reconfigure -C .\hello_world
